@@ -242,17 +242,32 @@ public class Module implements IXposedHookLoadPackage {
 
     private UnlockMethod hookStatusBarBiometricUnlock(ClassLoader classLoader, Object statusBar, Class<?> statusBarClass) throws Throwable {
         Object biometricUnlockController = getBiometricUnlockControllerFromStatusBar(statusBar, statusBarClass);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-            Class<?> biometricUnlockScoreClass = classLoader.loadClass(BIOMETRIC_UNLOCK_SOURCE_CLASS);
-            Method startWakeAndUnlock = asAccessible(biometricUnlockController.getClass().getDeclaredMethod("startWakeAndUnlock", int.class, biometricUnlockScoreClass));
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+			Class<?> sourceClass = classLoader.loadClass(BIOMETRIC_UNLOCK_SOURCE_CLASS);
+			Class<?> controllerClass = biometricUnlockController.getClass();
 
-            return intent -> {
-                if (intent.getBooleanExtra(EXTRA_BYPASS_KEYGUARD, true)) {
-                    int unlockMode = intent.getIntExtra(EXTRA_UNLOCK_MODE, MODE_UNLOCK_FADING);
-                    startWakeAndUnlock.invoke(biometricUnlockController, unlockMode, null);
-                }
-            };
-        }
+			// Sep 2026 build: (mode, source, userId). Older V builds: (mode, source).
+			Method withUser = null;
+			try {
+				withUser = asAccessible(controllerClass.getDeclaredMethod(
+						"startWakeAndUnlock", int.class, sourceClass, int.class));
+			} catch (NoSuchMethodException ignored) { }
+			final Method threeArg = withUser;
+			final Method twoArg = (withUser != null) ? null : asAccessible(
+					controllerClass.getDeclaredMethod("startWakeAndUnlock", int.class, sourceClass));
+
+			return intent -> {
+				if (intent.getBooleanExtra(EXTRA_BYPASS_KEYGUARD, true)) {
+					int unlockMode = intent.getIntExtra(EXTRA_UNLOCK_MODE, MODE_UNLOCK_FADING);
+					if (threeArg != null) {
+						threeArg.invoke(biometricUnlockController, unlockMode, null,
+								Util.INSTANCE.getCurrentUser());
+					} else {
+						twoArg.invoke(biometricUnlockController, unlockMode, null);
+					}
+				}
+			};
+		}
         Method startWakeAndUnlock = asAccessible(biometricUnlockController.getClass().getDeclaredMethod("startWakeAndUnlock", int.class));
 
         return intent -> {
