@@ -219,7 +219,7 @@ public class Module implements IXposedHookLoadPackage {
         Object kum = asAccessible(statusBarClass.getDeclaredField("mKeyguardUpdateMonitor")).get(statusBar);
 
         XposedBridge.log("UA: hookStatusBar running");
-        UnlockMethod method = hookStatusBarBiometricUnlock(classLoader, statusBar, statusBarClass);
+        UnlockMethod method = hookStatusBarBiometricUnlock(classLoader, statusBar, statusBarClass, kum);
 
         UnlockReceiver.INSTANCE.setup(context, statusBar, intent -> {
             XposedBridge.log("UA: unlock intent " + intent + " extras=" + intent.getExtras());
@@ -246,10 +246,38 @@ public class Module implements IXposedHookLoadPackage {
         return asAccessible(statusBarClass.getDeclaredField("mBiometricUnlockController")).get(statusBar);
     }
 
-    private UnlockMethod hookStatusBarBiometricUnlock(ClassLoader classLoader, Object statusBar, Class<?> statusBarClass) throws Throwable {
+    /** Logs every declared method whose name contains {@code needle}, so we can see what this Android build offers. */
+    private void logMethods(String label, Class<?> clazz, String needle) {
+        try {
+            for (Method m : clazz.getDeclaredMethods()) {
+                if (m.getName().toLowerCase().contains(needle)) {
+                    XposedBridge.log("UA: " + label + " method: " + m);
+                }
+            }
+        } catch (Throwable t) {
+            XposedBridge.log(t);
+        }
+    }
+
+    /** Returns the enum constant whose name contains {@code needle}, or null. */
+    private Object findEnumConstant(Class<?> enumClass, String needle) {
+        Object[] constants = enumClass.getEnumConstants();
+        if (constants == null) {
+            return null;
+        }
+        for (Object c : constants) {
+            if (c.toString().toUpperCase().contains(needle)) {
+                return c;
+            }
+        }
+        return null;
+    }
+
+    private UnlockMethod hookStatusBarBiometricUnlock(ClassLoader classLoader, Object statusBar, Class<?> statusBarClass, Object kum) throws Throwable {
         Object biometricUnlockController = getBiometricUnlockControllerFromStatusBar(statusBar, statusBarClass);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
             Class<?> sourceClass = classLoader.loadClass(BIOMETRIC_UNLOCK_SOURCE_CLASS);
+            Class<?> biometricTypeClass = classLoader.loadClass("android.hardware.biometrics.BiometricSourceType");
             Class<?> controllerClass = biometricUnlockController.getClass();
 
             // Newer builds: startWakeAndUnlock(mode, source, userId). Older V builds: (mode, source).
@@ -262,7 +290,51 @@ public class Module implements IXposedHookLoadPackage {
             final Method twoArg = (withUser != null) ? null : asAccessible(
                     controllerClass.getDeclaredMethod("startWakeAndUnlock", int.class, sourceClass));
 
-            XposedBridge.log("UA: unlock hook installed, threeArg=" + (threeArg != null));
+            // The real biometric callback, used by variant 2.
+            Method onAuth = null;
+            try {
+                onAuth = asAccessible(controllerClass.getDeclaredMethod(
+                        "onBiometricAuthenticated", int.class, biometricTypeClass, boolean.class));
+            } catch (NoSuchMethodException ignored) { }
+            final Method onAuthenticated = onAuth;
+
+            // KeyguardUpdateMonitor.handleFaceAuthenticated(int, boolean), used by variant 3.
+            Method handleFace = null;
+            try {
+                for (Method m : kum.getClass().getDeclaredMethods()) {
+                    Class<?>[] p = m.getParameterTypes();
+                    if (m.getName().equals("handleFaceAuthenticated")
+                            && p.length == 2 && p[0] == int.class && p[1] == boolean.class) {
+                        handleFace = asAccessible(m);
+                    }
+                }
+            } catch (Throwable t) {
+                XposedBridge.log(t);
+            }
+            final Method handleFaceAuthenticated = handleFace;
+
+            final Object faceUnlockSource = findEnumConstant(sourceClass, "FACE");
+            final Object faceBiometricType = findEnumConstant(biometricTypeClass, "FACE");
+
+            // Diagnostics: what does this Android build look like?
+            XposedBridge.log("UA: BiometricUnlockSource constants=" + Arrays.toString(sourceClass.getEnumConstants()));
+            logMethods("BiometricUnlockController", controllerClass, "authenticated");
+            logMethods("KeyguardUpdateMonitor", kum.getClass(), "authenticated");
+            try {
+                Object keyguardViewController = asAccessible(
+                        controllerClass.getDeclaredField("mKeyguardViewController")).get(biometricUnlockController);
+                if (keyguardViewController != null) {
+                    logMethods("KeyguardViewController", keyguardViewController.getClass(), "authenticated");
+                    logMethods("KeyguardViewController", keyguardViewController.getClass(), "dismiss");
+                }
+            } catch (Throwable t) {
+                XposedBridge.log(t);
+            }
+
+            XposedBridge.log("UA: unlock hook installed, threeArg=" + (threeArg != null)
+                    + " onAuthenticated=" + (onAuthenticated != null)
+                    + " handleFaceAuthenticated=" + (handleFaceAuthenticated != null)
+                    + " faceSource=" + faceUnlockSource);
 
             return intent -> {
                 boolean bypass = intent.getBooleanExtra(EXTRA_BYPASS_KEYGUARD, true);
@@ -270,16 +342,32 @@ public class Module implements IXposedHookLoadPackage {
                 // In the Sept 2026 build mode 8 does nothing and mode 7 dismisses the keyguard,
                 // so map the old "8" to "7".
                 int effectiveMode = (unlockMode == 8) ? 7 : unlockMode;
-                XposedBridge.log("UA: bypass=" + bypass + " mode=" + unlockMode + " effectiveMode=" + effectiveMode);
-                if (bypass) {
-                    if (threeArg != null) {
-                        threeArg.invoke(biometricUnlockController, effectiveMode, null,
-                                Util.INSTANCE.getCurrentUser());
-                    } else {
-                        twoArg.invoke(biometricUnlockController, effectiveMode, null);
-                    }
-                    XposedBridge.log("UA: startWakeAndUnlock returned");
+                // Test switch: adb broadcast with "--ei ua.variant N" picks the strategy.
+                int variant = intent.getIntExtra("ua.variant", 0);
+                int userId = Util.INSTANCE.getCurrentUser();
+                XposedBridge.log("UA: bypass=" + bypass + " mode=" + unlockMode + " effectiveMode=" + effectiveMode
+                        + " variant=" + variant + " userId=" + userId);
+                if (!bypass) {
+                    return;
                 }
+                if (variant == 2) {
+                    if (onAuthenticated == null || faceBiometricType == null) {
+                        XposedBridge.log("UA: variant 2 unavailable");
+                        return;
+                    }
+                    onAuthenticated.invoke(biometricUnlockController, userId, faceBiometricType, true);
+                } else if (variant == 3) {
+                    if (handleFaceAuthenticated == null) {
+                        XposedBridge.log("UA: variant 3 unavailable");
+                        return;
+                    }
+                    handleFaceAuthenticated.invoke(kum, userId, true);
+                } else if (threeArg != null) {
+                    threeArg.invoke(biometricUnlockController, effectiveMode, faceUnlockSource, userId);
+                } else {
+                    twoArg.invoke(biometricUnlockController, effectiveMode, faceUnlockSource);
+                }
+                XposedBridge.log("UA: done variant=" + variant);
             };
         }
         Method startWakeAndUnlock = asAccessible(biometricUnlockController.getClass().getDeclaredMethod("startWakeAndUnlock", int.class));
