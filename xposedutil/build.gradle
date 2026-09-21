@@ -51,30 +51,3 @@ dependencies {
     androidTestImplementation 'androidx.test.espresso:espresso-core:3.4.0'
 }
 
-publishing {
-    publications {
-        release(MavenPublication) {
-            groupId = 'ax.nd.xposedutil'
-            artifactId = 'xposedutil'
-            version = currentVersion
-
-            afterEvaluate {
-                from components.release
-            }
-        }
-    }
-    repositories {
-        maven {
-            name = 'gitlab'
-            def projectId = 4
-            url "https://git.svc.vepta.org/api/v4/projects/$projectId/packages/maven"
-            credentials(HttpHeaderCredentials) {
-                name = "Private-Token"
-                value = veptaGitlabPackageRegistryPersonalToken
-            }
-            authentication {
-                header(HttpHeaderAuthentication)
-            }
-        }
-    }
-}
