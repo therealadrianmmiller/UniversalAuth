@@ -218,64 +218,24 @@ public class Module implements IXposedHookLoadPackage {
         Context context = (Context) asAccessible(systemUiClass.getDeclaredField("mContext")).get(statusBar);
         Object kum = asAccessible(statusBarClass.getDeclaredField("mKeyguardUpdateMonitor")).get(statusBar);
 
-            XposedBridge.log("UA: hookStatusBar running");
-           UnlockMethod method = hookStatusBarBiometricUnlock(classLoader, statusBar, statusBarClass);
+        XposedBridge.log("UA: hookStatusBar running");
+        UnlockMethod method = hookStatusBarBiometricUnlock(classLoader, statusBar, statusBarClass);
 
-           UnlockReceiver.INSTANCE.setup(context, statusBar, intent -> {
-               XposedBridge.log("UA: unlock intent " + intent + " extras=" + intent.getExtras());
-               try {
-                   if (isUserInLockdown(kum)) {
-                       XposedBridge.log("UA: skipped, user in lockdown");
-                   } else {
-                       method.unlock(intent);
-                   }
-               } catch (Throwable t) {
-                   XposedBridge.log("UA: unlock failed");
-                   XposedBridge.log(t);       private UnlockMethod hookStatusBarBiometricUnlock(ClassLoader classLoader, Object statusBar, Class<?> statusBarClass) throws Throwable {
-           Object biometricUnlockController = getBiometricUnlockControllerFromStatusBar(statusBar, statusBarClass);
-           if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
-               Class<?> sourceClass = classLoader.loadClass(BIOMETRIC_UNLOCK_SOURCE_CLASS);
-               Class<?> controllerClass = biometricUnlockController.getClass();
-
-               Method withUser = null;
-               try {
-                   withUser = asAccessible(controllerClass.getDeclaredMethod(
-                           "startWakeAndUnlock", int.class, sourceClass, int.class));
-               } catch (NoSuchMethodException ignored) { }
-               final Method threeArg = withUser;
-               final Method twoArg = (withUser != null) ? null : asAccessible(
-                       controllerClass.getDeclaredMethod("startWakeAndUnlock", int.class, sourceClass));
-
-               XposedBridge.log("UA: unlock hook installed, threeArg=" + (threeArg != null));
-
-               return intent -> {
-                   boolean bypass = intent.getBooleanExtra(EXTRA_BYPASS_KEYGUARD, true);
-                   int unlockMode = intent.getIntExtra(EXTRA_UNLOCK_MODE, MODE_UNLOCK_FADING);
-                   XposedBridge.log("UA: bypass=" + bypass + " mode=" + unlockMode);
-                   if (bypass) {
-                       if (threeArg != null) {
-                           threeArg.invoke(biometricUnlockController, unlockMode, null,
-                                   Util.INSTANCE.getCurrentUser());
-                       } else {
-                           twoArg.invoke(biometricUnlockController, unlockMode, null);
-                       }
-                       XposedBridge.log("UA: startWakeAndUnlock returned");
-                   }
-               };
-           }
-           Method startWakeAndUnlock = asAccessible(biometricUnlockController.getClass().getDeclaredMethod("startWakeAndUnlock", int.class));
-
-           return intent -> {
-               if (intent.getBooleanExtra(EXTRA_BYPASS_KEYGUARD, true)) {
-                   int unlockMode = intent.getIntExtra(EXTRA_UNLOCK_MODE, MODE_UNLOCK_FADING);
-                   startWakeAndUnlock.invoke(biometricUnlockController, unlockMode);
-               }
-           };
-       }
-                   throw new RuntimeException(t);
-               }
-               return Unit.INSTANCE;
-           });  
+        UnlockReceiver.INSTANCE.setup(context, statusBar, intent -> {
+            XposedBridge.log("UA: unlock intent " + intent + " extras=" + intent.getExtras());
+            try {
+                if (isUserInLockdown(kum)) {
+                    XposedBridge.log("UA: skipped, user in lockdown");
+                } else {
+                    method.unlock(intent);
+                }
+            } catch (Throwable t) {
+                XposedBridge.log("UA: unlock failed");
+                XposedBridge.log(t);
+                throw new RuntimeException(t);
+            }
+            return Unit.INSTANCE;
+        });
     }
 
     public interface UnlockMethod {
@@ -286,5 +246,49 @@ public class Module implements IXposedHookLoadPackage {
         return asAccessible(statusBarClass.getDeclaredField("mBiometricUnlockController")).get(statusBar);
     }
 
-    
+    private UnlockMethod hookStatusBarBiometricUnlock(ClassLoader classLoader, Object statusBar, Class<?> statusBarClass) throws Throwable {
+        Object biometricUnlockController = getBiometricUnlockControllerFromStatusBar(statusBar, statusBarClass);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+            Class<?> sourceClass = classLoader.loadClass(BIOMETRIC_UNLOCK_SOURCE_CLASS);
+            Class<?> controllerClass = biometricUnlockController.getClass();
+
+            // Newer builds: startWakeAndUnlock(mode, source, userId). Older V builds: (mode, source).
+            Method withUser = null;
+            try {
+                withUser = asAccessible(controllerClass.getDeclaredMethod(
+                        "startWakeAndUnlock", int.class, sourceClass, int.class));
+            } catch (NoSuchMethodException ignored) { }
+            final Method threeArg = withUser;
+            final Method twoArg = (withUser != null) ? null : asAccessible(
+                    controllerClass.getDeclaredMethod("startWakeAndUnlock", int.class, sourceClass));
+
+            XposedBridge.log("UA: unlock hook installed, threeArg=" + (threeArg != null));
+
+            return intent -> {
+                boolean bypass = intent.getBooleanExtra(EXTRA_BYPASS_KEYGUARD, true);
+                int unlockMode = intent.getIntExtra(EXTRA_UNLOCK_MODE, MODE_UNLOCK_FADING);
+                // In the Sept 2026 build mode 8 does nothing and mode 7 dismisses the keyguard,
+                // so map the old "8" to "7".
+                int effectiveMode = (unlockMode == 8) ? 7 : unlockMode;
+                XposedBridge.log("UA: bypass=" + bypass + " mode=" + unlockMode + " effectiveMode=" + effectiveMode);
+                if (bypass) {
+                    if (threeArg != null) {
+                        threeArg.invoke(biometricUnlockController, effectiveMode, null,
+                                Util.INSTANCE.getCurrentUser());
+                    } else {
+                        twoArg.invoke(biometricUnlockController, effectiveMode, null);
+                    }
+                    XposedBridge.log("UA: startWakeAndUnlock returned");
+                }
+            };
+        }
+        Method startWakeAndUnlock = asAccessible(biometricUnlockController.getClass().getDeclaredMethod("startWakeAndUnlock", int.class));
+
+        return intent -> {
+            if (intent.getBooleanExtra(EXTRA_BYPASS_KEYGUARD, true)) {
+                int unlockMode = intent.getIntExtra(EXTRA_UNLOCK_MODE, MODE_UNLOCK_FADING);
+                startWakeAndUnlock.invoke(biometricUnlockController, unlockMode);
+            }
+        };
+    }
 }
