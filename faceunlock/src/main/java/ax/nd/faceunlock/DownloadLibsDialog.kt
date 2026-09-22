@@ -31,21 +31,8 @@ class DownloadLibsDialog(private val activity: MainActivity, private val viewMod
                             activity.checkAndAskForPermissions()
                         }
                         status == null -> {
-                            // Ask download
-                            dialog = MaterialDialog(activity).show {
-                                title(text = "Download required")
-                                message(text = "The app needs to download some library files (<35 MB) necessary for face recognition to work. Download them now?" +
-                                        "\n\nAlternatively, you can import the file manually.")
-                                positiveButton(android.R.string.ok) {
-                                    viewModel.downloadLibs(activity, null)
-                                }
-                                negativeButton(text = "Manual import") {
-                                    viewModel.setAskImport()
-                                }
-                                cancelOnTouchOutside(false)
-                                cancelable(false)
-                                noAutoDismiss()
-                            }
+                            // Removed download option - only manual import now available
+                            viewModel.setAskImport()
                         }
                         status is DownloadStatus.AskImport -> {
                             // Ask user to import libraries manually
