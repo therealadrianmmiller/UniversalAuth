@@ -36,7 +36,7 @@ The face unlock module depends on closed source, proprietary libraries developed
 
 #### Installation
 1. Install and enable the UniversalAuth Xposed module, and install the Face Unlock APK. You can download them from [the releases page](https://github.com/therealadrianmmiller/UniversalAuth/releases).
-2. Download the required Motorola Face Unlock APK (01.03.0312) via link above, or [here](https://www.apkmirror.com/apk/motorola-mobility-llc/motorola-face-unlock-6/motorola-face-unlock-6-01-03-0312-release/motorola-face-unlock-6-01-03-0312-android-apk-download/ 
+2. Download the required Motorola Face Unlock APK (01.03.0312) [here](https://www.apkmirror.com/apk/motorola-mobility-llc/motorola-face-unlock-6/motorola-face-unlock-6-01-03-0312-release/motorola-face-unlock-6-01-03-0312-android-apk-download/) 
 3. Reboot to make sure the Xposed module is enabled.
 4. Launch "Face unlock"
 5. Manually install the **com.motorola.faceunlock_01.03.0312** APK downloaded previously in Step 2
@@ -44,6 +44,13 @@ The face unlock module depends on closed source, proprietary libraries developed
 7. Enable the accessibility service when asked.
 8. Press the "START SETUP" button to enroll your face. The app will ask you to grant it camera permissions, make sure to select "allow while using the app" if that option is available.
 9. Lock your phone and test that you are able to use face unlock!
+
+#### In use notes
+
+There may be delays before face scan starts, these are the most common reasons, in order, and not something attributable to code:
+- Camera warm-up. The face app's camera has to initialize from cold each time; this varies run to run and isn't something the module controls.
+- The trigger method itself firing late. KeyguardUpdateMonitor calls updateFaceListeningState from several places (screen on, keyguard visibility change, doze changes), and on some builds it's debounced or delayed slightly by the system.
+- Thermal or Doze throttling, especially if the lag is worse after the phone's been idle for a while.
 
 # Credits
 Thanks to:
