@@ -1,3 +1,6 @@
+// Logging added throughout via XposedBridge for hopefully easier maintenance in future
+// in case Google changes the glasses again
+
 package ax.nd.universalauth.xposed;
 
 import static ax.nd.universalauth.xposed.common.XposedConstants.EXTRA_BYPASS_KEYGUARD;
