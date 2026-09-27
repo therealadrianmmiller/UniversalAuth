@@ -11,7 +11,7 @@ This project aims to bring a variety of custom authentication options to various
 
 - **In September 2026, Google changed a biometric class in Android 17 (when the same class was unchanged in previous ROM in July) and broke it, which is when i forked it and stumbled my way through fixing it as a newb to coding, compiling and building APK's (with some help from AI). I contacted @cubewhy with updates, but he was no longer using it and unable to test so i can only confirm this works for post-September stock Android 17, which i used and tested it on.**
 
-- **My version adds logging (via XposedBridge) and is visible via Lspoded Manager if theres issues OR another change by Google to the biometric class**
+- **My version adds logging (via XposedBridge) and is visible via Lsposed Manager if theres issues OR another change by Google to the biometric class**
 
 -  **An alternate fork, which is patched as far as Android 16, and combines the 2 separate APKS (app and lsposed module) into one is available here: https://github.com/Aba114514/UniversalAuth  - I had no way to contact the user and notify of the changes id made, so hopefully he updates his version for Android 17.**
 
